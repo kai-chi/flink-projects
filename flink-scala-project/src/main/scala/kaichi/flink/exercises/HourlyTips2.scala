@@ -9,6 +9,9 @@ import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
 import org.apache.flink.streaming.api.windowing.time.Time
 
+/**
+  * Solution incomplete - does not return window's end timestamp
+  */
 object HourlyTips2 {
   def main(args: Array[String]): Unit = {
     val input = ParameterTool.fromArgs(args).getRequired("input")
