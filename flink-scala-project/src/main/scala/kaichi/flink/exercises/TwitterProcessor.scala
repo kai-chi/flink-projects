@@ -5,7 +5,7 @@ import java.time.{LocalDateTime, ZoneId}
 import java.util.Properties
 
 import com.typesafe.config.{Config, ConfigFactory}
-import org.apache.flink.api.common.functions.{FlatMapFunction, ReduceFunction}
+import org.apache.flink.api.common.functions._
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
 import org.apache.flink.streaming.api.TimeCharacteristic
 import org.apache.flink.streaming.api.functions.AssignerWithPeriodicWatermarks
@@ -31,32 +31,39 @@ object TwitterProcessor {
     val streamSource = env
       .addSource(new TwitterSource(props))
       .assignTimestampsAndWatermarks(new EventAssigner)
-      .flatMap(new HashtagWeights)
-      .keyBy(1)
+      .filter(new FindEnglishTweets).setParallelism(5)
+      .flatMap(new HashtagWeights).setParallelism(3)
+      .map(new ToUpperTweet).setParallelism(2)
+      .keyBy(0)
       .timeWindow(Time.seconds(5))
-      .reduce(new CountHashtags)
+      .reduce {(v1, v2) => (v1._1, v1._2 + v2._2, "") }
 
     streamSource.print()
 
     env.execute("Twitter Processor")
   }
 
-  class HashtagWeights extends FlatMapFunction[String, (String, Integer)] {
+  class HashtagWeights extends FlatMapFunction[String, (String, Integer, String)] {
     lazy val jsonParser = new ObjectMapper()
 
-    override def flatMap(value: String, out: Collector[(String, Integer)]): Unit = {
+    override def flatMap(value: String, out: Collector[(String, Integer, String)]): Unit = {
       val jsonNode = jsonParser.readValue(value, classOf[JsonNode])
-      var hashtags: Integer = 0
+      var hashtagsLength: Integer = 0
+      var text = ""
 
       //get the number of hashtags
       if (jsonNode.has("entities") && jsonNode.get("entities").has("hashtags"))
-        hashtags = jsonNode.get("entities").get("hashtags").size
+        hashtagsLength = jsonNode.get("entities").get("hashtags").size
+
+      //get the text of the Tweet
+      if (jsonNode.has("text"))
+        text = jsonNode.get("text").asText()
 
       //filter out records without time zone
       if (jsonNode.has("user") && jsonNode.get("user").has("time_zone")) {
         jsonNode.get("user").get("time_zone").asText() match {
           case "null" =>
-          case s => out.collect(s, hashtags)
+          case timeZone => out.collect(timeZone, hashtagsLength, text)
         }
       }
 
@@ -64,8 +71,7 @@ object TwitterProcessor {
   }
 
   class CountHashtags extends ReduceFunction[(String, Integer)] {
-    override def reduce(value1: (String, Integer), value2: (String, Integer)): (String, Integer) =
-      return new Tuple2[String, Integer](value1._1, value1._2 + value2._2)
+    override def reduce(value1: (String, Integer), value2: (String, Integer)): (String, Integer) = (value1._1, value1._2 + value2._2)
   }
 
   class EventAssigner extends AssignerWithPeriodicWatermarks[String] {
@@ -96,5 +102,50 @@ object TwitterProcessor {
     val formatter: DateTimeFormatter =
       DateTimeFormatter.ofPattern("EEE MMM dd HH:mm:ss Z yyyy")
   }
+
+  class ToUpperTweet extends MapFunction[(String, Integer, String), (String, Integer, String)] {
+
+    override def map(value: (String, Integer, String)): (String, Integer, String) = {
+      (value._1, value._2, value._3.toUpperCase)
+    }
+  }
+
+  class FindEnglishTweets extends FilterFunction[String] {
+    lazy val jsonParser = new ObjectMapper()
+
+    override def filter(x: String): Boolean = {
+      val jsonNode = jsonParser.readValue(x, classOf[JsonNode])
+      if (jsonNode.has("lang")) {
+        jsonNode.get("lang").asText().equals("en")
+      }
+      else
+        false
+    }
+  }
+
+  //  class AggregateTweets extends AggregateFunction[(String, Integer, String), (String, Integer, String), (String, Integer, String)] {
+  //
+  //    override def add(value: (String, Integer, String), accumulator: (String, Integer, String)): (String, Integer, String) = {
+  //      if (value._2 > accumulator._2) {
+  //        (value._1, value._2 + accumulator._2, value._3)
+  //      }
+  //      else {
+  //        (value._1, value._2 + accumulator._2, accumulator._3)
+  //      }
+  //    }
+  //
+  //    override def createAccumulator(): (String, Integer, String) = ("", 0, "")
+  //
+  //    override def getResult(accumulator: (String, Integer, String)): (String, Integer, String) = (accumulator._1, accumulator._2, accumulator._3)
+  //
+  //    override def merge(a: (String, Integer, String), b: (String, Integer, String)): (String, Integer, String) = {
+  //      if (a._2 > b._2) {
+  //        (a._1, a._2+b._2, a._3)
+  //      }
+  //      else {
+  //        (a._1, a._2+b._2, b._3)
+  //      }
+  //    }
+  //  }
 
 }
