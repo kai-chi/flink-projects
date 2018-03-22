@@ -28,15 +28,21 @@ object TwitterProcessor {
     val env = StreamExecutionEnvironment.getExecutionEnvironment
     env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
 
+    /*
+      filter out without timezone
+      flat map -> generate (timezone, hashtag)
+      key by timezone
+      reduce to count hashtags per timezone
+     */
     val streamSource = env
       .addSource(new TwitterSource(props))
-      .assignTimestampsAndWatermarks(new EventAssigner)
-      .filter(new FindEnglishTweets).setParallelism(5)
-      .flatMap(new HashtagWeights).setParallelism(3)
-      .map(new ToUpperTweet).setParallelism(2)
-      .keyBy(0)
-      .timeWindow(Time.seconds(5))
-      .reduce {(v1, v2) => (v1._1, v1._2 + v2._2, "") }
+          .assignTimestampsAndWatermarks(new EventAssigner)
+          .filter(new FindEnglishTweets).setParallelism(5)
+          .flatMap(new HashtagWeights).setParallelism(3)
+          .map(new ToUpperTweet).setParallelism(2)
+//          .keyBy(0)
+//          .timeWindow(Time.seconds(5))
+
 
     streamSource.print()
 
@@ -122,30 +128,5 @@ object TwitterProcessor {
         false
     }
   }
-
-  //  class AggregateTweets extends AggregateFunction[(String, Integer, String), (String, Integer, String), (String, Integer, String)] {
-  //
-  //    override def add(value: (String, Integer, String), accumulator: (String, Integer, String)): (String, Integer, String) = {
-  //      if (value._2 > accumulator._2) {
-  //        (value._1, value._2 + accumulator._2, value._3)
-  //      }
-  //      else {
-  //        (value._1, value._2 + accumulator._2, accumulator._3)
-  //      }
-  //    }
-  //
-  //    override def createAccumulator(): (String, Integer, String) = ("", 0, "")
-  //
-  //    override def getResult(accumulator: (String, Integer, String)): (String, Integer, String) = (accumulator._1, accumulator._2, accumulator._3)
-  //
-  //    override def merge(a: (String, Integer, String), b: (String, Integer, String)): (String, Integer, String) = {
-  //      if (a._2 > b._2) {
-  //        (a._1, a._2+b._2, a._3)
-  //      }
-  //      else {
-  //        (a._1, a._2+b._2, b._3)
-  //      }
-  //    }
-  //  }
 
 }
