@@ -24,7 +24,7 @@ public class App {
         DataStream<Event> eventStream = env.addSource(new EventGenerator());
         eventStream = eventStream
                 .assignTimestampsAndWatermarks(new EventAssigner())
-                .transform("OrderOperator", eventStream.getType(), new OrderOperator<>());
+                .transform("OrderOperator", eventStream.getType(), new OrderOperator<>()).setParallelism(2);
 
         eventStream.print();
 
